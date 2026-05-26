@@ -11,8 +11,8 @@ pub fn create_directory() {
         .values((
             id.eq(Uuid::now_v7().to_string()),
             path.eq("/home/seoayoon/pub"),
-            created_at.eq(chrono::Local::now().naive_local()),
-            updated_at.eq(chrono::Local::now().naive_local()),
+            created_at.eq(chrono::Utc::now().naive_utc()),
+            updated_at.eq(chrono::Utc::now().naive_utc()),
         ))
         .execute(&mut connection)
         .expect("Error inserting new directory");
@@ -24,6 +24,6 @@ pub fn create_directory() {
 
     println!("Displaying {} directories", results.len());
     for directory in results {
-        println!("{}: {}", directory.id.unwrap_or_default(), directory.path);
+        println!("{}: {}", directory.id, directory.path);
     }
 }
