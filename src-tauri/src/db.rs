@@ -8,10 +8,9 @@ pub fn establish_connection() -> SqliteConnection {
         let database_url = proj_dirs
             .data_dir()
             .join("database.db")
-            .to_str()
-            .unwrap()
+            .to_string_lossy()
             .to_string();
-
+        
         SqliteConnection::establish(&database_url)
             .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
     } else {
@@ -36,19 +35,15 @@ pub fn run_migrations(
 }
 
 pub fn initialize_database() {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "seoayoon", "bookbug") {
+    let proj_dirs = ProjectDirs::from("com", "seoayoon", "bookbug").expect("Could not determine project directories");
+
         let database_url = proj_dirs
             .data_dir()
-            .join("database.db")
-            .to_str()
-            .unwrap()
-            .to_string();
+            .join("database.db");
 
         std::fs::create_dir_all(proj_dirs.data_dir()).expect("Failed to create data directory");
 
-        if !std::fs::exists(&database_url).unwrap_or(false) {
+        if !database_url.exists() {
             std::fs::File::create(&database_url).expect("Failed to create database file");
         }
-        
-    }
 }
