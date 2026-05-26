@@ -22,4 +22,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+diesel = { version = "2.3.9", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "chrono"] }
+directories = "6.0.0"
+chrono = "0.4.44"
+uuid = { version = "1.23.1", features = ["v7"] }
+diesel_migrations = { version = "2.3.2", features = ["sqlite"] }
 
