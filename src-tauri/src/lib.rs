@@ -15,9 +15,7 @@ pub fn run() {
     // seed::create_directory();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![
-            commands::test::test
-        ])
+        .invoke_handler(tauri::generate_handler![commands::test::test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
