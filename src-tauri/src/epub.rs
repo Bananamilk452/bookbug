@@ -1,44 +1,44 @@
+use crate::utils::Error;
 use roxmltree::Document;
 use serde_derive::Serialize;
 use std::collections::HashMap;
-use std::error::Error;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use zip::ZipArchive;
 
 #[derive(Debug, Serialize)]
-struct Metadata {
-    uuid: String,
-    isbn: String,
-    title: String,
-    creator: String,
-    language: String,
-    date_modification: String,
-    subject: String,
-    description: String,
-    rights: String,
-    relation: String,
-    date_publication: String,
-    format: String,
-    publisher: String,
+pub struct Metadata {
+    pub uuid: String,
+    pub isbn: String,
+    pub title: String,
+    pub creator: String,
+    pub language: String,
+    pub date_modification: String,
+    pub subject: String,
+    pub description: String,
+    pub rights: String,
+    pub relation: String,
+    pub date_publication: String,
+    pub format: String,
+    pub publisher: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct EpubManifest {
-    metadata: Metadata,
-    spine: Vec<SpineItem>,
-    manifest: HashMap<String, ManifestItem>,
+    pub metadata: Metadata,
+    pub spine: Vec<SpineItem>,
+    pub manifest: HashMap<String, ManifestItem>,
 }
 
 #[derive(Debug, Serialize)]
-struct ManifestItem {
-    href: String,
-    media_type: String,
+pub struct ManifestItem {
+    pub href: String,
+    pub media_type: String,
 }
 
 #[derive(Debug, Serialize)]
-struct SpineItem {
-    idref: String,
+pub struct SpineItem {
+    pub idref: String,
 }
 
 pub struct EpubStore {
@@ -47,7 +47,7 @@ pub struct EpubStore {
 }
 
 impl EpubStore {
-    pub fn load(epub_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(epub_path: &str) -> Result<Self, Error> {
         let file = std::fs::File::open(epub_path)?;
         let mut archive = ZipArchive::new(file)?;
         let mut files = HashMap::new();
@@ -70,26 +70,31 @@ impl EpubStore {
 
 pub type EpubState = Arc<Mutex<Option<EpubStore>>>;
 
-fn get_full_path_from_container_xml(contents: &str) -> Result<String, Box<dyn Error>> {
+fn get_full_path_from_container_xml(contents: &str) -> Result<String, Error> {
     let doc = Document::parse(contents)?;
     let node = doc.descendants().find(|n| n.has_tag_name("rootfile"));
     if let Some(node) = node {
         if let Some(full_path) = node.attribute("full-path") {
             Ok(full_path.to_string())
         } else {
-            Err("Error: 'full-path' attribute not found in 'rootfile' element".into())
+            Err(Error::Epub(
+                "'full-path' attribute not found in 'rootfile' element".to_string(),
+            ))
         }
     } else {
-        Err("Error: 'rootfile' element not found in container.xml".into())
+        Err(Error::Epub(
+            "'rootfile' element not found in container.xml".to_string(),
+        ))
     }
 }
 
-fn extract_metadata_from_opf(contents: &str) -> Result<Metadata, Box<dyn Error>> {
-    let doc = Document::parse(contents)?;
+fn extract_metadata_from_opf(doc: &Document) -> Result<Metadata, Error> {
     let metadata_node = doc
         .descendants()
         .find(|n| n.has_tag_name("metadata"))
-        .ok_or("Error: 'metadata' element not found in OPF file")?;
+        .ok_or(Error::Epub(
+            "'metadata' element not found in OPF file".to_string(),
+        ))?;
 
     let get_text = |tag: &str| {
         metadata_node
@@ -100,31 +105,74 @@ fn extract_metadata_from_opf(contents: &str) -> Result<Metadata, Box<dyn Error>>
             .to_string()
     };
 
+    let uuid = metadata_node
+        .descendants()
+        .filter(|n| n.has_tag_name("identifier"))
+        .find(|n| {
+            n.attributes()
+                .any(|a| a.name() == "scheme" && a.value() == "UUID")
+        })
+        .and_then(|n| n.text())
+        .unwrap_or("")
+        .to_string();
+
+    let isbn = metadata_node
+        .descendants()
+        .filter(|n| n.has_tag_name("identifier"))
+        .find(|n| {
+            n.attributes()
+                .any(|a| a.name() == "scheme" && a.value() == "ISBN")
+        })
+        .and_then(|n| n.text())
+        .unwrap_or("")
+        .to_string();
+
+    let date_modification = metadata_node
+        .descendants()
+        .filter(|n| n.has_tag_name("date"))
+        .find(|n| {
+            n.attributes()
+                .any(|a| a.name() == "event" && a.value() == "modification")
+        })
+        .and_then(|n| n.text())
+        .unwrap_or("")
+        .to_string();
+
+    let date_publication = metadata_node
+        .descendants()
+        .filter(|n| n.has_tag_name("date"))
+        .find(|n| {
+            n.attributes()
+                .any(|a| a.name() == "event" && a.value() == "publication")
+        })
+        .and_then(|n| n.text())
+        .unwrap_or("")
+        .to_string();
+
     Ok(Metadata {
-        uuid: get_text("identifier"),
-        isbn: get_text("identifier"),
+        uuid,
+        isbn,
         title: get_text("title"),
         creator: get_text("creator"),
         language: get_text("language"),
-        date_modification: get_text("date"),
+        date_modification,
         subject: get_text("subject"),
         description: get_text("description"),
         rights: get_text("rights"),
         relation: get_text("relation"),
-        date_publication: get_text("date"),
+        date_publication,
         format: get_text("format"),
         publisher: get_text("publisher"),
     })
 }
 
-fn extract_manifest_from_opf(
-    contents: &str,
-) -> Result<HashMap<String, ManifestItem>, Box<dyn Error>> {
-    let doc = Document::parse(contents)?;
+fn extract_manifest_from_opf(doc: &Document) -> Result<HashMap<String, ManifestItem>, Error> {
     let manifest_node = doc
         .descendants()
         .find(|n| n.has_tag_name("manifest"))
-        .ok_or("Error: 'manifest' element not found in OPF file")?;
+        .ok_or(Error::Epub(
+            "'manifest' element not found in OPF file".to_string(),
+        ))?;
 
     let mut manifest = HashMap::new();
     for item in manifest_node.children().filter(|n| n.has_tag_name("item")) {
@@ -145,12 +193,13 @@ fn extract_manifest_from_opf(
     Ok(manifest)
 }
 
-fn extract_spine_from_opf(contents: &str) -> Result<Vec<SpineItem>, Box<dyn Error>> {
-    let doc = Document::parse(contents)?;
+fn extract_spine_from_opf(doc: &Document) -> Result<Vec<SpineItem>, Error> {
     let spine_node = doc
         .descendants()
         .find(|n| n.has_tag_name("spine"))
-        .ok_or("Error: 'spine' element not found in OPF file")?;
+        .ok_or(Error::Epub(
+            "'spine' element not found in OPF file".to_string(),
+        ))?;
 
     let mut spine = Vec::new();
     for itemref in spine_node.children().filter(|n| n.has_tag_name("itemref")) {
@@ -163,25 +212,26 @@ fn extract_spine_from_opf(contents: &str) -> Result<Vec<SpineItem>, Box<dyn Erro
     Ok(spine)
 }
 
-pub fn parse_epub(files: &HashMap<String, Vec<u8>>) -> Result<EpubManifest, Box<dyn Error>> {
-    let container = files
-        .get("META-INF/container.xml")
-        .ok_or("Error: 'META-INF/container.xml' not found in EPUB archive")?;
+pub fn parse_epub(files: &HashMap<String, Vec<u8>>) -> Result<EpubManifest, Error> {
+    let container = files.get("META-INF/container.xml").ok_or(Error::Epub(
+        "'META-INF/container.xml' not found in EPUB archive".to_string(),
+    ))?;
 
-    let opf_path = get_full_path_from_container_xml(
-        std::str::from_utf8(container)
-            .map_err(|_| "Error: unable to convert container.xml contents to UTF-8")?,
-    )?;
+    let opf_path =
+        get_full_path_from_container_xml(std::str::from_utf8(container).map_err(|_| {
+            Error::Epub("unable to convert container.xml contents to UTF-8".to_string())
+        })?)?;
     let opf = std::str::from_utf8(
         files
             .get(&opf_path)
-            .ok_or_else(|| format!("Error: OPF file not found in archive: {}", opf_path))?,
+            .ok_or_else(|| Error::Epub(format!("OPF file not found in archive: {}", opf_path)))?,
     )
-    .map_err(|_| "Error: unable to convert OPF contents to UTF-8")?;
+    .map_err(|_| Error::Epub("unable to convert OPF contents to UTF-8".to_string()))?;
 
-    let metadata = extract_metadata_from_opf(opf)?;
-    let manifest = extract_manifest_from_opf(opf)?;
-    let spine = extract_spine_from_opf(opf)?;
+    let doc = Document::parse(opf)?;
+    let metadata = extract_metadata_from_opf(&doc)?;
+    let manifest = extract_manifest_from_opf(&doc)?;
+    let spine = extract_spine_from_opf(&doc)?;
     let epub_manifest = EpubManifest {
         metadata,
         manifest,
@@ -202,14 +252,16 @@ mod tests {
   </rootfiles>
 </container>"#;
 
-    const OPF_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier>urn:uuid:550e8400-e29b-41d4-a716-446655440000</dc:identifier>
+    const OPF_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:identifier id="bookid" opf:scheme="UUID">urn:uuid:5537d26c-b3d7-4591-981b-c801a1762dbf</dc:identifier>
+    <dc:identifier opf:scheme="ISBN">978-89-374-9220-4</dc:identifier>
     <dc:title>테스트 EPUB</dc:title>
     <dc:creator>홍길동</dc:creator>
     <dc:language>ko</dc:language>
-    <dc:date>2026-01-15</dc:date>
+    <dc:date opf:event="modification">2024-07-24</dc:date>
+    <dc:date opf:event="publication">2024-07-24</dc:date>
     <dc:subject>소설</dc:subject>
     <dc:description>테스트용 EPUB 파일입니다</dc:description>
     <dc:publisher>테스트출판사</dc:publisher>
@@ -285,14 +337,18 @@ mod tests {
 
     #[test]
     fn test_extract_metadata_from_opf() {
-        let metadata = extract_metadata_from_opf(OPF_XML).unwrap();
+        let doc = Document::parse(OPF_XML).unwrap();
+        let metadata = extract_metadata_from_opf(&doc).unwrap();
         assert_eq!(
             metadata.uuid,
-            "urn:uuid:550e8400-e29b-41d4-a716-446655440000"
+            "urn:uuid:5537d26c-b3d7-4591-981b-c801a1762dbf"
         );
+        assert_eq!(metadata.isbn, "978-89-374-9220-4");
         assert_eq!(metadata.title, "테스트 EPUB");
         assert_eq!(metadata.creator, "홍길동");
         assert_eq!(metadata.language, "ko");
+        assert_eq!(metadata.date_modification, "2024-07-24");
+        assert_eq!(metadata.date_publication, "2024-07-24");
         assert_eq!(metadata.subject, "소설");
         assert_eq!(metadata.description, "테스트용 EPUB 파일입니다");
         assert_eq!(metadata.publisher, "테스트출판사");
@@ -309,7 +365,8 @@ mod tests {
     <dc:title>Minimal</dc:title>
   </metadata>
 </package>"#;
-        let metadata = extract_metadata_from_opf(opf).unwrap();
+        let doc = Document::parse(opf).unwrap();
+        let metadata = extract_metadata_from_opf(&doc).unwrap();
         assert_eq!(metadata.title, "Minimal");
         assert_eq!(metadata.creator, "");
         assert_eq!(metadata.language, "");
@@ -321,17 +378,19 @@ mod tests {
         let opf = r#"<?xml version="1.0"?>
 <package>
 </package>"#;
-        let result = extract_metadata_from_opf(opf);
+        let doc = Document::parse(opf).unwrap();
+        let result = extract_metadata_from_opf(&doc);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("'metadata' element not found"));
+            .contains("metadata' element not found"));
     }
 
     #[test]
     fn test_extract_manifest_from_opf() {
-        let manifest = extract_manifest_from_opf(OPF_XML).unwrap();
+        let doc = Document::parse(OPF_XML).unwrap();
+        let manifest = extract_manifest_from_opf(&doc).unwrap();
         assert_eq!(manifest.len(), 4);
         assert_eq!(manifest.get("ncx").unwrap().href, "toc.ncx");
         assert_eq!(
@@ -359,7 +418,8 @@ mod tests {
   <manifest>
   </manifest>
 </package>"#;
-        let manifest = extract_manifest_from_opf(opf).unwrap();
+        let doc = Document::parse(opf).unwrap();
+        let manifest = extract_manifest_from_opf(&doc).unwrap();
         assert!(manifest.is_empty());
     }
 
@@ -368,17 +428,19 @@ mod tests {
         let opf = r#"<?xml version="1.0"?>
 <package>
 </package>"#;
-        let result = extract_manifest_from_opf(opf);
+        let doc = Document::parse(opf).unwrap();
+        let result = extract_manifest_from_opf(&doc);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("'manifest' element not found"));
+            .contains("manifest' element not found"));
     }
 
     #[test]
     fn test_extract_spine_from_opf() {
-        let spine = extract_spine_from_opf(OPF_XML).unwrap();
+        let doc = Document::parse(OPF_XML).unwrap();
+        let spine = extract_spine_from_opf(&doc).unwrap();
         assert_eq!(spine.len(), 2);
         assert_eq!(spine[0].idref, "cover");
         assert_eq!(spine[1].idref, "chapter1");
@@ -391,7 +453,8 @@ mod tests {
   <spine>
   </spine>
 </package>"#;
-        let spine = extract_spine_from_opf(opf).unwrap();
+        let doc = Document::parse(opf).unwrap();
+        let spine = extract_spine_from_opf(&doc).unwrap();
         assert!(spine.is_empty());
     }
 
@@ -400,12 +463,13 @@ mod tests {
         let opf = r#"<?xml version="1.0"?>
 <package>
 </package>"#;
-        let result = extract_spine_from_opf(opf);
+        let doc = Document::parse(opf).unwrap();
+        let result = extract_spine_from_opf(&doc);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("'spine' element not found"));
+            .contains("spine' element not found"));
     }
 
     #[test]
