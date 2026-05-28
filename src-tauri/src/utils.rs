@@ -4,6 +4,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("failed to parse as string: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+    #[error(transparent)]
+    Zip(#[from] zip::result::ZipError),
+    #[error(transparent)]
+    Xml(#[from] roxmltree::Error),
+    #[error("{0}")]
+    Epub(String),
 }
 
 #[derive(serde::Serialize)]
@@ -12,6 +18,9 @@ pub enum Error {
 enum ErrorKind {
     Io(String),
     Utf8(String),
+    Zip(String),
+    Xml(String),
+    Epub(String),
 }
 
 impl serde::Serialize for Error {
@@ -23,6 +32,9 @@ impl serde::Serialize for Error {
         let error_kind = match self {
             Self::Io(_) => ErrorKind::Io(error_message),
             Self::Utf8(_) => ErrorKind::Utf8(error_message),
+            Self::Zip(_) => ErrorKind::Zip(error_message),
+            Self::Xml(_) => ErrorKind::Xml(error_message),
+            Self::Epub(_) => ErrorKind::Epub(error_message),
         };
         error_kind.serialize(serializer)
     }

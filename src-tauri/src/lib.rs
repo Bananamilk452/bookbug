@@ -1,4 +1,5 @@
 pub mod db;
+pub mod epub;
 pub mod models;
 pub mod schema;
 pub mod seed;

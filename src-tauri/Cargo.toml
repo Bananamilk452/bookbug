@@ -28,4 +28,6 @@ chrono = "0.4.44"
 uuid = { version = "1.23.1", features = ["v7"] }
 diesel_migrations = { version = "2.3.2", features = ["sqlite"] }
 thiserror = "2.0.18"
+zip = "8.6.0"
+roxmltree = "0.21.1"
 
