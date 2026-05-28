@@ -6,7 +6,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 use zip::ZipArchive;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Metadata {
     uuid: String,
     isbn: String,
@@ -23,20 +23,20 @@ struct Metadata {
     publisher: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EpubManifest {
     metadata: Metadata,
     spine: Vec<SpineItem>,
     manifest: HashMap<String, ManifestItem>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ManifestItem {
     href: String,
     media_type: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct SpineItem {
     idref: String,
 }
@@ -172,8 +172,12 @@ pub fn parse_epub(files: &HashMap<String, Vec<u8>>) -> Result<EpubManifest, Box<
         std::str::from_utf8(container)
             .map_err(|_| "Error: unable to convert container.xml contents to UTF-8")?,
     )?;
-    let opf = std::str::from_utf8(&files[&opf_path])
-        .map_err(|_| "Error: unable to convert OPF contents to UTF-8")?;
+    let opf = std::str::from_utf8(
+        files
+            .get(&opf_path)
+            .ok_or_else(|| format!("Error: OPF file not found in archive: {}", opf_path))?,
+    )
+    .map_err(|_| "Error: unable to convert OPF contents to UTF-8")?;
 
     let metadata = extract_metadata_from_opf(opf)?;
     let manifest = extract_manifest_from_opf(opf)?;
@@ -185,4 +189,268 @@ pub fn parse_epub(files: &HashMap<String, Vec<u8>>) -> Result<EpubManifest, Box<
     };
 
     Ok(epub_manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CONTAINER_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+
+    const OPF_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier>urn:uuid:550e8400-e29b-41d4-a716-446655440000</dc:identifier>
+    <dc:title>테스트 EPUB</dc:title>
+    <dc:creator>홍길동</dc:creator>
+    <dc:language>ko</dc:language>
+    <dc:date>2026-01-15</dc:date>
+    <dc:subject>소설</dc:subject>
+    <dc:description>테스트용 EPUB 파일입니다</dc:description>
+    <dc:publisher>테스트출판사</dc:publisher>
+    <dc:rights>All rights reserved</dc:rights>
+    <dc:relation>시리즈 1권</dc:relation>
+    <dc:format>EPUB 3.0</dc:format>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+  </manifest>
+  <spine>
+    <itemref idref="cover"/>
+    <itemref idref="chapter1"/>
+  </spine>
+</package>"#;
+
+    const BAD_CONTAINER_XML: &str = r#"<?xml version="1.0"?>
+<container>
+  <rootfiles>
+    <rootfile/>
+  </rootfiles>
+</container>"#;
+
+    const CONTAINER_XML_NO_ROOTFILE: &str = r#"<?xml version="1.0"?>
+<container>
+  <rootfiles>
+    <other/>
+  </rootfiles>
+</container>"#;
+
+    fn make_fake_epub_files(
+        opf_path: &str,
+        container_xml: &str,
+        opf_xml: &str,
+    ) -> HashMap<String, Vec<u8>> {
+        let mut files = HashMap::new();
+        files.insert(
+            "META-INF/container.xml".to_string(),
+            container_xml.as_bytes().to_vec(),
+        );
+        files.insert(opf_path.to_string(), opf_xml.as_bytes().to_vec());
+        files
+    }
+
+    #[test]
+    fn test_get_full_path_from_container_xml() {
+        let path = get_full_path_from_container_xml(CONTAINER_XML).unwrap();
+        assert_eq!(path, "OEBPS/content.opf");
+    }
+
+    #[test]
+    fn test_get_full_path_missing_attribute() {
+        let result = get_full_path_from_container_xml(BAD_CONTAINER_XML);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'full-path' attribute not found"));
+    }
+
+    #[test]
+    fn test_get_full_path_missing_rootfile() {
+        let result = get_full_path_from_container_xml(CONTAINER_XML_NO_ROOTFILE);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'rootfile' element not found"));
+    }
+
+    #[test]
+    fn test_extract_metadata_from_opf() {
+        let metadata = extract_metadata_from_opf(OPF_XML).unwrap();
+        assert_eq!(
+            metadata.uuid,
+            "urn:uuid:550e8400-e29b-41d4-a716-446655440000"
+        );
+        assert_eq!(metadata.title, "테스트 EPUB");
+        assert_eq!(metadata.creator, "홍길동");
+        assert_eq!(metadata.language, "ko");
+        assert_eq!(metadata.subject, "소설");
+        assert_eq!(metadata.description, "테스트용 EPUB 파일입니다");
+        assert_eq!(metadata.publisher, "테스트출판사");
+        assert_eq!(metadata.rights, "All rights reserved");
+        assert_eq!(metadata.relation, "시리즈 1권");
+        assert_eq!(metadata.format, "EPUB 3.0");
+    }
+
+    #[test]
+    fn test_extract_metadata_missing_fields() {
+        let opf = r#"<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Minimal</dc:title>
+  </metadata>
+</package>"#;
+        let metadata = extract_metadata_from_opf(opf).unwrap();
+        assert_eq!(metadata.title, "Minimal");
+        assert_eq!(metadata.creator, "");
+        assert_eq!(metadata.language, "");
+        assert_eq!(metadata.publisher, "");
+    }
+
+    #[test]
+    fn test_extract_metadata_no_metadata_element() {
+        let opf = r#"<?xml version="1.0"?>
+<package>
+</package>"#;
+        let result = extract_metadata_from_opf(opf);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'metadata' element not found"));
+    }
+
+    #[test]
+    fn test_extract_manifest_from_opf() {
+        let manifest = extract_manifest_from_opf(OPF_XML).unwrap();
+        assert_eq!(manifest.len(), 4);
+        assert_eq!(manifest.get("ncx").unwrap().href, "toc.ncx");
+        assert_eq!(
+            manifest.get("ncx").unwrap().media_type,
+            "application/x-dtbncx+xml"
+        );
+        assert_eq!(manifest.get("cover").unwrap().href, "cover.xhtml");
+        assert_eq!(
+            manifest.get("cover").unwrap().media_type,
+            "application/xhtml+xml"
+        );
+        assert_eq!(manifest.get("chapter1").unwrap().href, "chapter1.xhtml");
+        assert_eq!(
+            manifest.get("chapter1").unwrap().media_type,
+            "application/xhtml+xml"
+        );
+        assert_eq!(manifest.get("css").unwrap().href, "style.css");
+        assert_eq!(manifest.get("css").unwrap().media_type, "text/css");
+    }
+
+    #[test]
+    fn test_extract_manifest_empty() {
+        let opf = r#"<?xml version="1.0"?>
+<package>
+  <manifest>
+  </manifest>
+</package>"#;
+        let manifest = extract_manifest_from_opf(opf).unwrap();
+        assert!(manifest.is_empty());
+    }
+
+    #[test]
+    fn test_extract_manifest_missing_element() {
+        let opf = r#"<?xml version="1.0"?>
+<package>
+</package>"#;
+        let result = extract_manifest_from_opf(opf);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'manifest' element not found"));
+    }
+
+    #[test]
+    fn test_extract_spine_from_opf() {
+        let spine = extract_spine_from_opf(OPF_XML).unwrap();
+        assert_eq!(spine.len(), 2);
+        assert_eq!(spine[0].idref, "cover");
+        assert_eq!(spine[1].idref, "chapter1");
+    }
+
+    #[test]
+    fn test_extract_spine_empty() {
+        let opf = r#"<?xml version="1.0"?>
+<package>
+  <spine>
+  </spine>
+</package>"#;
+        let spine = extract_spine_from_opf(opf).unwrap();
+        assert!(spine.is_empty());
+    }
+
+    #[test]
+    fn test_extract_spine_missing_element() {
+        let opf = r#"<?xml version="1.0"?>
+<package>
+</package>"#;
+        let result = extract_spine_from_opf(opf);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'spine' element not found"));
+    }
+
+    #[test]
+    fn test_parse_epub_success() {
+        let files = make_fake_epub_files("OEBPS/content.opf", CONTAINER_XML, OPF_XML);
+        let epub = parse_epub(&files).unwrap();
+        assert_eq!(epub.metadata.title, "테스트 EPUB");
+        assert_eq!(epub.spine.len(), 2);
+        assert_eq!(epub.manifest.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_epub_opf_path_not_found_in_files() {
+        let files = make_fake_epub_files("OEBPS/missing.opf", CONTAINER_XML, OPF_XML);
+        let result = parse_epub(&files);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("OPF file not found in archive"));
+    }
+
+    #[test]
+    fn test_parse_epub_broken_container_xml() {
+        let mut files = HashMap::new();
+        files.insert(
+            "META-INF/container.xml".to_string(),
+            b"not valid xml".to_vec(),
+        );
+        let result = parse_epub(&files);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_epub_store_load_real_file() {
+        let manifest_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let epub_path = manifest_path.join("./tests/test.epub");
+
+        let store = EpubStore::load(epub_path.to_str().unwrap()).unwrap();
+
+        assert!(!store.files.is_empty());
+        assert!(store.files.contains_key("META-INF/container.xml"));
+
+        assert!(!store.manifest.metadata.title.is_empty());
+        assert!(!store.manifest.spine.is_empty());
+        assert!(!store.manifest.manifest.is_empty());
+    }
 }
