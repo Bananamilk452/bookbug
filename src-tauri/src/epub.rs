@@ -1,12 +1,13 @@
 use crate::utils::Error;
 use roxmltree::Document;
-use serde_derive::Serialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use zip::ZipArchive;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Metadata {
     pub uuid: String,
     pub isbn: String,
@@ -24,6 +25,7 @@ pub struct Metadata {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EpubManifest {
     pub metadata: Metadata,
     pub spine: Vec<SpineItem>,
@@ -31,12 +33,14 @@ pub struct EpubManifest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ManifestItem {
     pub href: String,
     pub media_type: String,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpineItem {
     pub idref: String,
 }

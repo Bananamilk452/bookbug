@@ -317,7 +317,6 @@ dependencies = [
  "directories",
  "roxmltree",
  "serde",
- "serde_derive",
  "serde_json",
  "tauri",
  "tauri-build",
